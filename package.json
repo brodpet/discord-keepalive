@@ -1,0 +1,10 @@
+{
+  "name": "discord-keepalive",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Keeps a Discord channel active via silent webhook pings",
+  "main": "keepalive.js",
+  "scripts": {
+    "start": "node keepalive.js"
+  }
+}
