@@ -1,40 +1,57 @@
-import 'node:process';
+import { Client, GatewayIntentBits } from 'discord.js';
+import { joinVoiceChannel, VoiceConnectionStatus, entersState } from '@discordjs/voice';
 
-const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
-const INTERVAL_MS = (parseInt(process.env.INTERVAL_MINUTES ?? '30', 10)) * 60 * 1000;
+const TOKEN = process.env.DISCORD_BOT_TOKEN;
+const GUILD_ID = process.env.DISCORD_GUILD_ID;
+const CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
 
-if (!WEBHOOK_URL) {
-  console.error('Missing DISCORD_WEBHOOK_URL environment variable.');
+if (!TOKEN || !GUILD_ID || !CHANNEL_ID) {
+  console.error('Missing required env vars: DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, DISCORD_CHANNEL_ID');
   process.exit(1);
 }
 
-async function ping() {
-  // Post a message with wait=true so we get the message ID back
-  const postRes = await fetch(`${WEBHOOK_URL}?wait=true`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content: '​' }), // zero-width space — renders as blank
-  });
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
+});
 
-  if (!postRes.ok) {
-    console.error(`[${new Date().toISOString()}] POST failed: ${postRes.status}`);
+function join() {
+  const guild = client.guilds.cache.get(GUILD_ID);
+  if (!guild) {
+    console.error('Guild not found — check DISCORD_GUILD_ID');
     return;
   }
 
-  const msg = await postRes.json();
-
-  // Immediately delete it so nothing is visible in chat
-  const delRes = await fetch(`${WEBHOOK_URL}/messages/${msg.id}`, {
-    method: 'DELETE',
+  const connection = joinVoiceChannel({
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    adapterCreator: guild.voiceAdapterCreator,
+    selfDeaf: true,
+    selfMute: true,
   });
 
-  if (delRes.ok) {
-    console.log(`[${new Date().toISOString()}] Ping sent and deleted (id: ${msg.id})`);
-  } else {
-    console.error(`[${new Date().toISOString()}] DELETE failed: ${delRes.status}`);
-  }
+  connection.on(VoiceConnectionStatus.Disconnected, async () => {
+    try {
+      // Try to reconnect if briefly disconnected
+      await Promise.race([
+        entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
+        entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
+      ]);
+    } catch {
+      // Full reconnect
+      console.log(`[${new Date().toISOString()}] Reconnecting...`);
+      connection.destroy();
+      join();
+    }
+  });
+
+  connection.on(VoiceConnectionStatus.Ready, () => {
+    console.log(`[${new Date().toISOString()}] Joined voice channel — sitting silently.`);
+  });
 }
 
-console.log(`Discord keepalive started — pinging every ${INTERVAL_MS / 60000} minutes.`);
-ping();
-setInterval(ping, INTERVAL_MS);
+client.once('ready', () => {
+  console.log(`[${new Date().toISOString()}] Logged in as ${client.user.tag}`);
+  join();
+});
+
+client.login(TOKEN);
