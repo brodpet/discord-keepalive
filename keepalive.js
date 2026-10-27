@@ -1,5 +1,5 @@
 import { Client, GatewayIntentBits } from 'discord.js';
-import { joinVoiceChannel, VoiceConnectionStatus, entersState } from '@discordjs/voice';
+import { joinVoiceChannel, getVoiceConnection, VoiceConnectionStatus, entersState } from '@discordjs/voice';
 
 const TOKEN = process.env.DISCORD_BOT_TOKEN;
 const GUILD_ID = process.env.DISCORD_GUILD_ID;
@@ -49,9 +49,31 @@ function join() {
   });
 }
 
-client.once('ready', () => {
+let failedChecks = 0;
+
+function checkConnection() {
+  const connection = getVoiceConnection(GUILD_ID);
+  const me = client.guilds.cache.get(GUILD_ID)?.members.me;
+  const healthy = connection?.state.status === VoiceConnectionStatus.Ready && me?.voice.channelId === CHANNEL_ID;
+
+  if (healthy) {
+    failedChecks = 0;
+    return;
+  }
+
+  // Wait for a second failed check so normal reconnects aren't interrupted
+  if (++failedChecks < 2) return;
+
+  console.log(`[${new Date().toISOString()}] Health check: not in voice channel, rejoining...`);
+  failedChecks = 0;
+  connection?.destroy();
+  join();
+}
+
+client.once('clientReady', () => {
   console.log(`[${new Date().toISOString()}] Logged in as ${client.user.tag}`);
   join();
+  setInterval(checkConnection, 60_000);
 });
 
 client.login(TOKEN);
